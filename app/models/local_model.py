@@ -1,20 +1,23 @@
 import time
-import subprocess
+import requests
 
-# These are the local models you can use
-# Make sure you've pulled them first with: ollama pull <model_name>
+# Supported local models available for selection via Ollama runtime.
 AVAILABLE_MODELS = ["llama3", "mistral", "phi3", "gemma"]
+
+# Ollama REST API endpoint for text generation.
+OLLAMA_URL = "http://localhost:11434/api/generate"
 
 
 class LocalModel:
 
     def __init__(self, model: str = "llama3"):
         """
-        You can choose which local model to use when creating this object.
-        Example: LocalModel("mistral") or LocalModel("phi3")
-        Defaults to llama3 if nothing is specified.
+        Initialises the LocalModel with the specified Ollama model.
+
+        Args:
+            model (str): Name of the model to use. Defaults to 'llama3'.
+                         Falls back to 'llama3' if the requested model is not supported.
         """
-        # If the model requested isn't in our list, fall back to llama3
         if model in AVAILABLE_MODELS:
             self.model = model
         else:
@@ -23,38 +26,89 @@ class LocalModel:
 
     def _run_ollama(self, prompt: str) -> dict:
         """
-        Internal method that actually calls Ollama via command line.
-        Returns the output text, model name, and how long it took.
+        Sends a prompt to the Ollama REST API and returns the generated response.
+
+        Args:
+            prompt (str): The input prompt to be processed by the model.
+
+        Returns:
+            dict: Contains 'model' name, 'output' text, and 'response_time' in seconds.
         """
         start = time.time()
+        try:
+            response = requests.post(OLLAMA_URL, json={
+                "model": self.model,
+                "prompt": prompt,
+                "stream": False
+            }, timeout=120)
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError(
+                "Cannot connect to Ollama. Make sure it is running: ollama serve"
+            )
+        except requests.exceptions.Timeout:
+            raise RuntimeError("Ollama timed out. The model may be too large for your machine.")
 
-        cmd = ["ollama", "run", self.model, prompt]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if response.status_code == 404:
+            raise RuntimeError(
+                f"Model '{self.model}' not found in Ollama. Pull it first: ollama pull {self.model}"
+            )
+        response.raise_for_status()
 
         end = time.time()
-
         return {
             "model": self.model,
-            "output": result.stdout.strip(),
+            "output": response.json()["response"].strip(),
             "response_time": round(end - start, 3),
         }
 
     def summarise(self, text: str) -> dict:
+        """
+        Generates a concise summary of the provided text.
+
+        Args:
+            text (str): The input text to summarise.
+
+        Returns:
+            dict: Model response containing the generated summary.
+        """
         prompt = f"Summarise this text clearly in 3-5 sentences:\n\n{text}"
         return self._run_ollama(prompt)
 
     def flashcards(self, text: str) -> dict:
+        """
+        Generates study flashcards in Q/A format from the provided text.
+
+        Args:
+            text (str): The input text to generate flashcards from.
+
+        Returns:
+            dict: Model response containing the generated flashcards.
+        """
         prompt = f"Create 5 flashcards in Q: A: format from this text:\n\n{text}"
         return self._run_ollama(prompt)
 
     def quiz(self, text: str) -> dict:
-        prompt = f"Create 3 multiple choice questions (with 4 options and the correct answer) from this text:\n\n{text}"
+        """
+        Generates multiple choice quiz questions from the provided text.
+
+        Args:
+            text (str): The input text to generate quiz questions from.
+
+        Returns:
+            dict: Model response containing the generated quiz questions.
+        """
+        prompt = f"Create 5 multiple choice questions (with 4 options and the correct answer) from this text:\n\n{text}"
         return self._run_ollama(prompt)
 
     def process_all(self, text: str) -> dict:
         """
-        Runs all three tasks (summary, flashcards, quiz) in one go.
-        This is useful for the /process endpoint to return everything at once.
+        Executes all generation tasks — summary, flashcards, and quiz — in a single API call.
+
+        Args:
+            text (str): The input text to process.
+
+        Returns:
+            dict: Model response containing summary, flashcards, and quiz output.
         """
         prompt = f"""
 You are an AI study assistant. A student has given you the following text.
@@ -63,7 +117,7 @@ Your job is to produce THREE things:
 
 1. SUMMARY: A clear 3-5 sentence summary
 2. FLASHCARDS: 3 flashcards in Q: / A: format
-3. QUIZ: 2 multiple choice questions with 4 options each and the correct answer marked
+3. QUIZ: 5 multiple choice questions with 4 options each and the correct answer marked
 
 Text:
 {text}

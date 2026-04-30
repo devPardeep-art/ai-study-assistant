@@ -1,0 +1,55 @@
+name: study_companion
+description: Multi-AI Study Companion App
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # HTTP requests to your FastAPI backend
+  http: ^1.1.0
+  dio: ^5.3.2
+
+  # Camera
+  camera: ^0.10.5+5
+
+  # Speech to text (microphone)
+  speech_to_text: ^7.0.0 
+
+  # Text to speech (read answers aloud)
+  flutter_tts: ^3.8.5
+
+  # OCR from photos
+  google_mlkit_text_recognition: ^0.14.0
+
+  # Shared preferences (store login token)
+  shared_preferences: ^2.2.2
+
+  # State management
+  provider: ^6.1.1
+
+  # Image handling
+  image_picker: ^1.0.4
+
+  # UI extras
+  flutter_animate: ^4.3.0
+  percent_indicator: ^4.2.3
+  lottie: ^2.7.0
+
+  cupertino_icons: ^1.0.2
+
+  # PDF generation and sharing
+  pdf: ^3.10.7
+  printing: ^5.11.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
