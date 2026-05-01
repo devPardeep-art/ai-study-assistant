@@ -194,10 +194,67 @@ class _CompareScreenState extends State<CompareScreen> {
     setState(() => _isFollowUpLoading = true);
     _scrollToBottom();
 
-    final result = await ApiService.compareModels(
-      text: _buildContextText(question),
-      models: _selectedModels.toList(),
-    );
+    // Build a chat history so each model has full context
+    final messages = <Map<String, String>>[];
+
+    if (_originalText.isNotEmpty) {
+      messages.add({
+        'role': 'user',
+        'content': 'Study material:\n$_originalText',
+      });
+      messages.add({
+        'role': 'assistant',
+        'content': 'I have read the study material and am ready to help.',
+      });
+    }
+
+    // Include up to 3 previous follow-up Q&A pairs
+    final prevFollowUps = _turns.where((t) => t.isFollowUp).toList();
+    final recent = prevFollowUps.length > 3
+        ? prevFollowUps.sublist(prevFollowUps.length - 3)
+        : prevFollowUps;
+    for (final t in recent) {
+      messages.add({'role': 'user', 'content': t.userMessage});
+      final prevResults = t.result['results'] as Map<String, dynamic>? ?? {};
+      if (prevResults.isNotEmpty) {
+        final firstOut =
+            (prevResults.values.first as Map<String, dynamic>)['output']
+                    as String? ??
+                '';
+        if (firstOut.isNotEmpty) {
+          messages.add({
+            'role': 'assistant',
+            'content': firstOut.length > 500
+                ? '${firstOut.substring(0, 500)}…'
+                : firstOut,
+          });
+        }
+      }
+    }
+
+    messages.add({'role': 'user', 'content': question});
+
+    // Query every selected model in parallel via the chat endpoint
+    final futures = _selectedModels.map((model) async {
+      final sw = Stopwatch()..start();
+      final res = await ApiService.sendChatMessage(
+        messages: messages,
+        model: 'local',
+        localModelName: model,
+      );
+      sw.stop();
+      final output = res['response'] as String? ??
+          res['output'] as String? ??
+          (res.containsKey('error') ? 'Error: ${res['error']}' : 'No response.');
+      return MapEntry(model, <String, dynamic>{
+        'output': output,
+        'response_time': (sw.elapsedMilliseconds / 1000.0).toStringAsFixed(2),
+        'metrics': <String, dynamic>{},
+      });
+    });
+
+    final entries = await Future.wait(futures);
+    final result = {'results': Map.fromEntries(entries)};
 
     final turn = _Turn(
       userMessage: question,
@@ -213,40 +270,6 @@ class _CompareScreenState extends State<CompareScreen> {
 
     _scrollToBottom();
     await _saveSession();
-  }
-
-  /// Builds the full context string sent to the backend for follow-up turns.
-  /// The backend sees the original material + up to 3 previous Q&A pairs +
-  /// the new question — no backend changes required.
-  String _buildContextText(String question) {
-    final buf = StringBuffer();
-    buf.writeln('STUDY MATERIAL:');
-    buf.writeln(_originalText);
-
-    final followUps = _turns.where((t) => t.isFollowUp).toList();
-    if (followUps.isNotEmpty) {
-      buf.writeln('\nPREVIOUS QUESTIONS:');
-      final recent =
-          followUps.length > 3 ? followUps.sublist(followUps.length - 3) : followUps;
-      for (int i = 0; i < recent.length; i++) {
-        final t = recent[i];
-        buf.writeln('\nQ${i + 1}: ${t.userMessage}');
-        final results = t.result['results'] as Map<String, dynamic>? ?? {};
-        if (results.isNotEmpty) {
-          final firstOut =
-              (results.values.first as Map<String, dynamic>)['output']
-                  as String? ??
-                  '';
-          if (firstOut.isNotEmpty) {
-            buf.writeln(
-                'A${i + 1}: ${firstOut.length > 400 ? '${firstOut.substring(0, 400)}…' : firstOut}');
-          }
-        }
-      }
-    }
-
-    buf.writeln('\nCURRENT QUESTION: $question');
-    return buf.toString();
   }
 
   // ─── SESSION SAVING ───────────────────────────────────────────────────────
@@ -1636,15 +1659,90 @@ class _OutputPageState extends State<_OutputPage>
     final cards =
         _parseFlashcards(_extractSection(widget.output, 'FLASHCARDS'));
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: cards.length,
-      itemBuilder: (_, i) {
-        return _FlashCard(
-          question: cards[i]['q'] ?? '',
-          answer: cards[i]['a'] ?? '',
-        );
-      },
+    return Column(
+      children: [
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF4F46E5).withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: const Color(0xFF4F46E5).withValues(alpha: 0.2)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.touch_app_rounded,
+                  color: Color(0xFF4F46E5), size: 16),
+              const SizedBox(width: 8),
+              Text('${cards.length} cards · tap to reveal',
+                  style: const TextStyle(
+                      color: Color(0xFF4F46E5),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500)),
+              const Spacer(),
+              GestureDetector(
+                onTap: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  for (final card in cards) {
+                    if ((card['q'] ?? '').isNotEmpty &&
+                        card['q'] != 'No flashcards found') {
+                      await ApiService.saveFlashcard(
+                        question: card['q']!,
+                        answer: card['a'] ?? '',
+                        modelName: widget.modelName,
+                      );
+                    }
+                  }
+                  if (context.mounted) {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('Flashcards saved to your collection!'),
+                        backgroundColor: Color(0xFF4F46E5),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF4F46E5),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.bookmark_add_rounded,
+                          color: Colors.white, size: 13),
+                      SizedBox(width: 4),
+                      Text('Save All',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: cards.length,
+            itemBuilder: (_, i) {
+              return _FlashCard(
+                question: cards[i]['q'] ?? '',
+                answer: cards[i]['a'] ?? '',
+                modelName: widget.modelName,
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -1710,10 +1808,12 @@ class _OutputPageState extends State<_OutputPage>
 class _FlashCard extends StatefulWidget {
   final String question;
   final String answer;
+  final String modelName;
 
   const _FlashCard({
     required this.question,
     required this.answer,
+    this.modelName = '',
   });
 
   @override
@@ -1721,27 +1821,84 @@ class _FlashCard extends StatefulWidget {
 }
 
 class _FlashCardState extends State<_FlashCard> {
-  bool show = false;
+  bool _show = false;
+  bool _saved = false;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => setState(() => show = !show),
-      child: Container(
+      onTap: () => setState(() => _show = !_show),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: _show
+              ? const Color(0xFF4F46E5).withValues(alpha: 0.06)
+              : Colors.white,
           borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: _show
+                ? const Color(0xFF4F46E5).withValues(alpha: 0.4)
+                : const Color(0xFFE5E7EB),
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.question,
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-            if (show) ...[
-              const Divider(),
-              Text(widget.answer),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(widget.question,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: Color(0xFF1E1B4B))),
+                ),
+                GestureDetector(
+                  onTap: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    await ApiService.saveFlashcard(
+                      question: widget.question,
+                      answer: widget.answer,
+                      modelName: widget.modelName,
+                    );
+                    if (mounted) {
+                      setState(() => _saved = true);
+                      messenger.showSnackBar(
+                        const SnackBar(
+                          content: Text('Flashcard saved!'),
+                          backgroundColor: Color(0xFF4F46E5),
+                          behavior: SnackBarBehavior.floating,
+                          duration: Duration(seconds: 1),
+                        ),
+                      );
+                    }
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: Icon(
+                      _saved
+                          ? Icons.bookmark_rounded
+                          : Icons.bookmark_border_rounded,
+                      size: 18,
+                      color: _saved
+                          ? const Color(0xFF4F46E5)
+                          : const Color(0xFF9CA3AF),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (_show) ...[
+              const Divider(color: Color(0xFFE5E7EB)),
+              Text(widget.answer,
+                  style: const TextStyle(
+                      color: Color(0xFF4F46E5), fontSize: 13, height: 1.5)),
+            ] else ...[
+              const SizedBox(height: 4),
+              const Text('Tap to reveal answer',
+                  style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 11)),
             ]
           ],
         ),

@@ -262,7 +262,9 @@ def compare_models(data: CompareInput):
             return name, {"error": str(e)}
 
     results = {}
-    with ThreadPoolExecutor(max_workers=len(data.models)) as pool:
+    # Cap at 2 concurrent workers — Ollama queues requests anyway, and running
+    # more than 2 LLMs simultaneously starves CPU/RAM making all of them slower.
+    with ThreadPoolExecutor(max_workers=min(len(data.models), 2)) as pool:
         futures = {pool.submit(_run_one, m): m for m in data.models}
         for future in as_completed(futures):
             name, result = future.result()
@@ -399,7 +401,7 @@ def chat(data: ChatInput):
                 resp = _requests.post(
                     "http://localhost:11434/api/generate",
                     json={"model": local_model, "prompt": prompt, "stream": False},
-                    timeout=120,
+                    timeout=300,
                 )
             except _requests.exceptions.ConnectionError:
                 return {"error": "Cannot connect to Ollama. Make sure it is running: ollama serve"}

@@ -40,7 +40,7 @@ class LocalModel:
                 "model": self.model,
                 "prompt": prompt,
                 "stream": False
-            }, timeout=120)
+            }, timeout=300)
         except requests.exceptions.ConnectionError:
             raise RuntimeError(
                 "Cannot connect to Ollama. Make sure it is running: ollama serve"

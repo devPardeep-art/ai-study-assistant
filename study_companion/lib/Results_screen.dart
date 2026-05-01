@@ -315,8 +315,49 @@ class _ResultsScreenState extends State<ResultsScreen>
             children: [
               const Icon(Icons.touch_app_rounded, color: kAccent, size: 16),
               const SizedBox(width: 8),
-              Text('Tap any card to reveal the answer · ${cards.length} cards',
+              Text('Tap to reveal · ${cards.length} cards',
                   style: const TextStyle(color: kAccent, fontSize: 12, fontWeight: FontWeight.w500)),
+              const Spacer(),
+              GestureDetector(
+                onTap: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  for (final card in cards) {
+                    if ((card['q'] ?? '').isNotEmpty && card['q'] != 'No flashcards found') {
+                      await ApiService.saveFlashcard(
+                        question: card['q']!,
+                        answer: card['a'] ?? '',
+                        modelName: _modelName,
+                      );
+                    }
+                  }
+                  if (mounted) {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('Flashcards saved to your collection!'),
+                        backgroundColor: Color(0xFF4F46E5),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: kAccent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.bookmark_add_rounded, color: Colors.white, size: 13),
+                      SizedBox(width: 4),
+                      Text('Save All',
+                          style: TextStyle(
+                              color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -340,6 +381,7 @@ class _ResultsScreenState extends State<ResultsScreen>
                 question: cards[index]['q'] ?? '',
                 answer: cards[index]['a'] ?? '',
                 index: index,
+                modelName: _modelName,
               ),
             ),
           ),
@@ -477,7 +519,8 @@ class _FlashCard extends StatefulWidget {
   final String question;
   final String answer;
   final int index;
-  const _FlashCard({required this.question, required this.answer, required this.index});
+  final String modelName;
+  const _FlashCard({required this.question, required this.answer, required this.index, required this.modelName});
   @override
   State<_FlashCard> createState() => _FlashCardState();
 }
@@ -572,6 +615,34 @@ class _FlashCardState extends State<_FlashCard> with SingleTickerProviderStateMi
                     ),
                   ),
                   const Spacer(),
+                  GestureDetector(
+                    onTap: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      await ApiService.saveFlashcard(
+                        question: widget.question,
+                        answer: widget.answer,
+                        modelName: widget.modelName,
+                      );
+                      if (context.mounted) {
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('Flashcard saved!'),
+                            backgroundColor: Color(0xFF4F46E5),
+                            behavior: SnackBarBehavior.floating,
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      }
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Icon(
+                        Icons.bookmark_border_rounded,
+                        color: _showAnswer ? kAccent : kText2,
+                        size: 18,
+                      ),
+                    ),
+                  ),
                   AnimatedRotation(
                     turns: _showAnswer ? 0.5 : 0,
                     duration: const Duration(milliseconds: 280),

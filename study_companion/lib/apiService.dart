@@ -382,6 +382,42 @@ class ApiService {
     }
   }
 
+  // ─── PINNED FLASHCARDS ────────────────────────────────────────────────
+  static const _pinnedFlashcardsKey = 'pinned_flashcards';
+
+  static Future<void> saveFlashcard({
+    required String question,
+    required String answer,
+    required String modelName,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_pinnedFlashcardsKey);
+    final cards = raw != null
+        ? (jsonDecode(raw) as List).cast<Map<String, dynamic>>()
+        : <Map<String, dynamic>>[];
+    if (cards.any((c) => c['question'] == question)) return;
+    cards.insert(0, {
+      'id': DateTime.now().millisecondsSinceEpoch.toString(),
+      'question': question,
+      'answer': answer,
+      'model': modelName,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+    if (cards.length > 200) cards.removeLast();
+    await prefs.setString(_pinnedFlashcardsKey, jsonEncode(cards));
+  }
+
+  static Future<List<Map<String, dynamic>>> getSavedFlashcards() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_pinnedFlashcardsKey);
+    if (raw == null) return [];
+    try {
+      return (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
+
   // ─── SUBMIT EVALUATION ────────────────────────────────────────────────
   static Future<void> submitEvaluation({
     required String model,

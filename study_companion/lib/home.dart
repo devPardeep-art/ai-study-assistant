@@ -21,34 +21,6 @@ class _SavedFlashcard {
   });
 }
 
-// ─── PARSING HELPERS ──────────────────────────────────────────────────────────
-
-String _extractSectionHome(String output, String section) {
-  final patterns = <String, RegExp>{
-    'FLASHCARDS': RegExp(
-        r'(?:2\.\s*)?FLASHCARD[S]?[:\s]*(.*?)(?=(?:3\.\s*)?QUIZ|$)',
-        dotAll: true, caseSensitive: false),
-  };
-  final match = patterns[section]?.firstMatch(output);
-  return match?.group(1)?.trim() ?? '';
-}
-
-List<Map<String, String>> _parseFlashcardsHome(String text) {
-  final qPattern = RegExp(r'Q\d*[:.]\s*(.*?)(?=A\d*[:.]\s*)', dotAll: true);
-  final aPattern = RegExp(r'A\d*[:.]\s*(.*?)(?=Q\d*[:.]\s*|$)', dotAll: true);
-  final questions =
-      qPattern.allMatches(text).map((m) => m.group(1)?.trim() ?? '').toList();
-  final answers =
-      aPattern.allMatches(text).map((m) => m.group(1)?.trim() ?? '').toList();
-  final cards = <Map<String, String>>[];
-  for (int i = 0; i < questions.length && i < answers.length; i++) {
-    if (questions[i].isNotEmpty) {
-      cards.add({'q': questions[i], 'a': answers[i]});
-    }
-  }
-  return cards;
-}
-
 // ─── HOME SCREEN ──────────────────────────────────────────────────────────────
 
 class HomeScreen extends StatefulWidget {
@@ -80,51 +52,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadFlashcards() async {
-    final sessions = await ApiService.getSessions();
-    final cards    = <_SavedFlashcard>[];
+    final pinned = await ApiService.getSavedFlashcards();
+    final cards  = <_SavedFlashcard>[];
 
-    for (final session in sessions) {
+    for (final p in pinned) {
       if (cards.length >= 20) break;
-      final result = session['result'] as Map<String, dynamic>? ?? {};
-
-      // compare sessions
-      final results = result['results'] as Map<String, dynamic>?;
-      if (results != null) {
-        for (final entry in results.entries) {
-          final output = (entry.value as Map)['output'] as String? ?? '';
-          if (output.isEmpty) continue;
-          final fcText = _extractSectionHome(output, 'FLASHCARDS');
-          for (final p in _parseFlashcardsHome(fcText)) {
-            if ((p['q'] ?? '').isNotEmpty && p['q'] != 'No flashcards found') {
-              cards.add(_SavedFlashcard(
-                  question: p['q']!,
-                  answer: p['a'] ?? '',
-                  modelName: entry.key));
-            }
-          }
-        }
-        continue;
-      }
-
-      // single-model sessions
-      final singleOutput = result['output'] as String? ?? '';
-      if (singleOutput.isNotEmpty) {
-        final fcText  = _extractSectionHome(singleOutput, 'FLASHCARDS');
-        final model   = (session['models'] as List?)?.firstOrNull?.toString() ?? 'AI';
-        for (final p in _parseFlashcardsHome(fcText)) {
-          if ((p['q'] ?? '').isNotEmpty && p['q'] != 'No flashcards found') {
-            cards.add(_SavedFlashcard(
-                question: p['q']!,
-                answer: p['a'] ?? '',
-                modelName: model));
-          }
-        }
+      final q = p['question'] as String? ?? '';
+      if (q.isNotEmpty) {
+        cards.add(_SavedFlashcard(
+          question: q,
+          answer: p['answer'] as String? ?? '',
+          modelName: p['model'] as String? ?? 'AI',
+        ));
       }
     }
 
     if (mounted) {
       setState(() {
-        _flashcards       = cards.take(20).toList();
+        _flashcards       = cards;
         _flashcardsLoaded = true;
       });
     }
@@ -634,8 +579,19 @@ class _HomeScreenState extends State<HomeScreen> {
                           color: Color(0xFF4F46E5),
                         ),
                       )
-                    : const Icon(Icons.picture_as_pdf_rounded,
-                        size: 16, color: Color(0xFF4F46E5)),
+                    : const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.picture_as_pdf_rounded,
+                              size: 14, color: Color(0xFF4F46E5)),
+                          SizedBox(width: 4),
+                          Text('Export PDF',
+                              style: TextStyle(
+                                  color: Color(0xFF4F46E5),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
               ),
               const SizedBox(width: 10),
               GestureDetector(
@@ -771,7 +727,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildRecentQuizzes() {
-    if (_quizResults.isEmpty) return const SizedBox.shrink();
     final recent = _quizResults.take(5).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -787,13 +742,45 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const Spacer(),
-            Text(
-              '${_quizResults.length} total',
-              style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11),
-            ),
+            if (_quizResults.isNotEmpty)
+              Text(
+                '${_quizResults.length} total',
+                style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11),
+              ),
           ],
         ),
         const SizedBox(height: 12),
+        if (_quizResults.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 28),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: const Column(
+              children: [
+                Icon(Icons.quiz_outlined, size: 32, color: Color(0xFFD1D5DB)),
+                SizedBox(height: 8),
+                Text('No quizzes taken yet',
+                    style: TextStyle(
+                        color: Color(0xFF9CA3AF),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500)),
+                SizedBox(height: 4),
+                Text('Complete a quiz to see your results here',
+                    style: TextStyle(color: Color(0xFFD1D5DB), fontSize: 11)),
+              ],
+            ),
+          ),
         ...recent.map((r) {
           final score   = r['score']     as int?    ?? 0;
           final total   = r['total']     as int?    ?? 0;
